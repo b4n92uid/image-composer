@@ -8,4 +8,6 @@ use App\Command\ImageComposer;
 $application = new Application();
 
 $application->add(new ImageComposer());
+
+$application->setDefaultCommand('compose', true);
 $application->run();
