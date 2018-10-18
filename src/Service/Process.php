@@ -1,8 +1,16 @@
 <?php
 /*
- * Process.php
- * © BELDJOUHRI Abdelghani 2016 <b4n92uid@gmail.com>
+ * File: Process.php
+ * Project: Service
+ * File Created: Sunday, 1st July 2018 14:38:00
+ * Author: BELDJOUHRI Abdelghani (b4n92uid@gmail.com)
+ * -----
+ * Last Modified: Thursday, 18th October 2018 20:50:56
+ * Modified By: BELDJOUHRI Abdelghani (b4n92uid@gmail.com>)
+ * -----
+ * Copyright 2018, StarFeel Interactive
  */
+
 
 namespace App\Service;
 
@@ -12,31 +20,53 @@ use Imagine\Image\ImageInterface;
 use Imagine\Image\Point\Center;
 
 /**
- * Process
- * Multi layer processing class
+ * The composition class
+ *
+ * This class is responsible for generating the final image file
+ * from the schema file and the given data
  */
 class Process
 {
 
-  function __construct($pastefile)
+  /**
+   * Default constructor
+   *
+   * @param $schemaFile the json file that describe the composition process
+   */
+  function __construct($schemaFile)
   {
-    $content = file_get_contents($pastefile);
+    // Load and parse compose file content
+
+    $content = file_get_contents($schemaFile);
     $content = preg_replace("#//.+\n#", "", $content);
     $content = preg_replace("#/\*.+\*/#", "", $content);
 
     $this->paste = json_decode($content, true);
 
     if($this->paste === null)
-      throw new \Exception('The Composing schema is invalide : ' . json_last_error_msg());
+      throw new \Exception('[Schema] The Composing schema is invalide : ' . json_last_error_msg());
+
+    // Initialize Imagine library
 
     $this->imagine = new \Imagine\Gd\Imagine();
 
     $palette = new \Imagine\Image\Palette\RGB();
 
+    // Load defined assets
+
+    $baseDir = dirname($schemaFile);
+
+    $this->loadAssets($baseDir);
+  }
+
+  /**
+   * Load asset defined in the "assets" section
+   * relative to $baseDir
+   */
+  private function loadAssets($baseDir)
+  {
     try
     {
-      $baseDir = dirname($pastefile);
-
       foreach ($this->paste['assets'] as $name => $params)
       {
         if(isset($params['font'])) {
@@ -54,11 +84,16 @@ class Process
       }
 
     } catch (\Exception $e) {
-      throw new \Exception("LOADING ASSET: " . $e->getMessage());
+      throw new \Exception('[Asset] ' . $e->getMessage());
 
     }
   }
 
+  /**
+   * Get the draw point computed from desired center point and the text bounding box
+   *
+   * @return null if the draw point exceed layer size
+   */
   private function mapToDrawPoint($text, $f, $point)
   {
     $box = $f->box($text);
@@ -70,12 +105,19 @@ class Process
     return null;
   }
 
+  /**
+   * Resolve the expression string
+   *
+   * Return the assets identified by @id
+   *
+   * Replace placeholder ${var} with variables value
+   */
   public function resolve($exp, $dict = null)
   {
     if(preg_match('#^@([a-zA-Z_]+)#', $exp, $matches))
     {
       if(!array_key_exists($matches[1], $this->assets))
-        throw new \Exception("Undefined assets `$matches[1]`");
+        throw new \Exception("[Resolve] Undefined assets `$matches[1]`");
 
       return $this->assets[$matches[1]];
     }
@@ -94,7 +136,7 @@ class Process
         if(array_key_exists($var, $dict))
           $expanded = $dict[$var];
         else
-          throw new \Exception("Undefined variable `$var`");
+          throw new \Exception("[Resolve] Undefined variable `$var`");
 
         if($filter !== null)
         {
@@ -115,6 +157,16 @@ class Process
     return $exp;
   }
 
+  /**
+   * Draw the text in the given $frame with selected $fonts and $pos
+   *
+   * @param $pos define the center of the texte
+   *
+   * @param $text can be a multiline string
+   *
+   * @param $fonts must be an array of font resource to try in order in case that
+   * the current font is to big for the rendered text
+   */
   private function drawText($frame, $text, $fonts, $pos)
   {
     $lines = explode("\n", $text);
@@ -154,7 +206,7 @@ class Process
       } while($linepos === null);
 
       if($selectedFont === false)
-        throw new \Exception("Cannot find correct coordinate for text : `$str`");
+        throw new \Exception("[String] Cannot find valid coordinate for text : `$str`");
 
       $pos = new Point($pos->getX(), $pos->getY() + $lineHeight);
     }
@@ -162,11 +214,20 @@ class Process
     reset($fonts);
   }
 
-  private function processString($frame, $layer, $u)
+  /**
+   * Process a string layer
+   *
+   * @param $frame the finale frame
+   *
+   * @param $layer the layer options
+   *
+   * @param $data the associative array where to resolve data
+   */
+  private function processString($frame, $layer, $data)
   {
     $t = $layer['string'];
 
-    $t = $this->resolve($t, $u);
+    $t = $this->resolve($t, $data);
 
     $t = str_replace("\\n", "\n", $t);
 
@@ -187,9 +248,18 @@ class Process
     $this->drawText($frame, $t, $fonts, new Point($x, $y));
   }
 
-  private function processImage($frame, $layer, $u)
+  /**
+   * Process an image layer
+   *
+   * @param $frame the finale frame
+   *
+   * @param $layer the layer options
+   *
+   * @param $data the associative array where to resolve data
+   */
+  private function processImage($frame, $layer, $data)
   {
-    $image = $this->resolve($layer['image'], $u);
+    $image = $this->resolve($layer['image'], $data);
 
     if(is_string($image))
     {
@@ -202,7 +272,7 @@ class Process
         {
           foreach($layer['default'] as $def)
           {
-            $image = $this->resolve($def, $u);
+            $image = $this->resolve($def, $data);
 
             try {
               $image = $this->imagine->open($image);
@@ -216,7 +286,7 @@ class Process
     }
 
     if($image === null || !($image instanceof \Imagine\Image\AbstractImage))
-      throw new \Exception("Unable to resolve image `$layer[image]`");
+      throw new \Exception("[Image] Unable to resolve image `$layer[image]`");
 
     if(isset($layer['filters']))
     {
@@ -235,12 +305,19 @@ class Process
       $frame->paste($image, new Point($x, $y));
 
     } catch (\Exception $e) {
-      throw new \Exception("PASTING `$layer[image]`: ".$e->getMessage());
+      throw new \Exception("[Image] `$layer[image]`: ".$e->getMessage());
 
     }
   }
 
-  public function process(&$data, $output)
+  /**
+   * Generate the composition with the given $data
+   *
+   * @param array $data associative array where to fetch resolved values
+   *
+   * @param $output the output file path of the composition
+   */
+  public function process($data, $output)
   {
       $defaults = array();
 
